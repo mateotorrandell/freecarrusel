@@ -51,3 +51,5 @@ freecarrusel*.log
 
 # OS
 Thumbs.db
+dist-desktop
+desktop/runtime

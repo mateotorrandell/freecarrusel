@@ -1,0 +1,71 @@
+name: Desktop installers
+
+# Builds the Windows and macOS installers. Each one has to be produced on its
+# own operating system — a .dmg cannot be assembled from Windows — so this runs
+# the same job on two runners and collects the results.
+#
+# Trigger it by pushing a tag (v0.2.0), or by hand from the Actions tab.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: --win
+            artifact: windows-installer
+          - os: macos-latest
+            platform: --mac
+            artifact: macos-installer
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Puppeteer's Chromium is a ~670 MB download the desktop build never
+      # uses: it renders with the Chromium Electron already ships.
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+
+      - name: Build the installer
+        run: npx electron-builder ${{ matrix.platform }} --publish never
+        env:
+          # Unsigned builds. Signing needs secrets this workflow deliberately
+          # does not assume exist; see the README for what that means for users.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/*.dmg
+            dist-desktop/*.AppImage
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-desktop/*.exe
+            dist-desktop/*.dmg
+            dist-desktop/*.AppImage
+          draft: true

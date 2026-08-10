@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Mutex } from "async-mutex";
+import { DATA_DIR } from "./paths";
 
 /**
  * JSON files under data/ are the whole database.
@@ -13,8 +14,6 @@ import { Mutex } from "async-mutex";
  *     every platform we support, so a crash mid-write leaves the previous file
  *     intact instead of a half-written one.
  */
-
-const DATA_DIR = path.resolve(process.cwd(), "data");
 
 const locks = new Map<string, Mutex>();
 

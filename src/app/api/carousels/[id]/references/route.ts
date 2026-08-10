@@ -14,6 +14,7 @@ import {
   readJson,
   text,
 } from "@/lib/http";
+import { resolveUpload } from "@/lib/paths";
 import { generateId, now } from "@/lib/utils";
 
 const UPLOADS = "/uploads/";
@@ -50,11 +51,8 @@ export async function POST(
       return badRequest(`url must be a path under ${UPLOADS}`);
     }
 
-    const publicDir = path.resolve(process.cwd(), "public");
-    const absPath = path.resolve(publicDir, `.${url}`);
-    if (!absPath.startsWith(publicDir)) {
-      return badRequest("url resolves outside the uploads folder");
-    }
+    const absPath = resolveUpload(url);
+    if (!absPath) return badRequest("url resolves outside the uploads folder");
 
     const carousel = await addReferenceImage(id, {
       id: generateId(),

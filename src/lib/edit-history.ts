@@ -1,6 +1,7 @@
 import { rm } from "fs/promises";
 import path from "path";
 import { readDataSafe, writeData } from "./data";
+import { dataFile } from "./paths";
 
 /**
  * Persistent undo/redo for the visual editor.
@@ -89,7 +90,7 @@ export async function syncHistory(
 
 /** Remove a carousel's history file so deleting a carousel doesn't leave junk. */
 export async function deleteHistory(carouselId: string): Promise<void> {
-  const target = path.resolve(process.cwd(), "data", fileFor(carouselId));
+  const target = dataFile(fileFor(carouselId));
   try {
     await rm(target, { force: true });
   } catch {

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { DATA_DIR } from "./paths";
 
 /**
  * Google Fonts CSS with every woff2 turned into a data: URI.
@@ -15,7 +16,7 @@ import path from "node:path";
  * for it again.
  */
 
-const CACHE_DIR = path.resolve(process.cwd(), "data", ".font-cache");
+const CACHE_DIR = path.join(DATA_DIR, ".font-cache");
 const WEIGHTS = "300;400;500;600;700;800";
 // Google serves woff2 only to browsers it recognises.
 const MODERN_BROWSER =

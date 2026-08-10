@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // The first call downloads the ONNX model (~40MB); later ones are quicker.
 export const maxDuration = 300;
 
-const UPLOAD_DIR = path.resolve(process.cwd(), "public/uploads");
+import { UPLOAD_DIR } from "@/lib/paths";
 
 /**
  * Cut the subject out of an already-uploaded image, saving a transparent PNG.

@@ -4,7 +4,7 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { generateId } from "./utils";
 
-const UPLOAD_DIR = path.resolve(process.cwd(), "public/uploads");
+import { UPLOAD_DIR } from "./paths";
 
 export interface ExtractedBrand {
   url: string;

@@ -14,6 +14,10 @@ import type { NextConfig } from "next";
  * the only third party on the list, and only for stylesheets and font files.
  */
 const config: NextConfig = {
+  // Emits .next/standalone: the server plus only the files it actually needs.
+  // That folder is what the desktop build ships, instead of node_modules.
+  output: "standalone",
+
   serverExternalPackages: ["sharp", "archiver", "puppeteer"],
 
   async headers() {

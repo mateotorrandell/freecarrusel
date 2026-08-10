@@ -10,6 +10,7 @@ import { getBrand } from "@/lib/brand";
 import { getCarousel } from "@/lib/carousels";
 import { getPreset } from "@/lib/style-presets";
 import { getSettings } from "@/lib/settings";
+import { AGENT_DIR, UPLOAD_DIR, dataFile } from "@/lib/paths";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
   // Deliberately NOT a dotted directory: permission globs like
   // `Write(**/.agent-cwd/**)` don't match hidden folders, which silently
   // denied the agent write access to its own workspace.
-  const agentCwd = path.join(process.cwd(), "data", "agent-workspace");
+  const agentCwd = AGENT_DIR;
   mkdirSync(agentCwd, { recursive: true });
 
   // The system prompt goes to a file, not an argv entry. On Windows the CLI is a
@@ -99,11 +100,11 @@ export async function POST(request: NextRequest) {
     // the agent can no longer run curl and stalls waiting for an approval it can't
     // request in -p mode. Grant that one capability back explicitly.
     "--settings",
-    path.join(process.cwd(), "data", ".agent-settings.json"),
+    dataFile(".agent-settings.json"),
     // The agent runs from a neutral cwd (see spawn below), so grant explicit read
     // access to the uploads dir for reference images.
     "--add-dir",
-    path.join(process.cwd(), "public", "uploads"),
+    UPLOAD_DIR,
     // A URL job (fetch the site, download assets, build several carousels) is
     // far heavier than a single-carousel request, so the ceiling has room.
     "--max-budget-usd",

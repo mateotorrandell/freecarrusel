@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import puppeteer, { type Browser } from "puppeteer";
+import type { Browser } from "puppeteer";
 import sharp from "sharp";
 import { extractFontFamilies, wrapSlideHtml } from "./slide-html";
 import { getInlinedFontCSS } from "./fonts";
 import { DIMENSIONS, type AspectRatio, type Slide } from "@/types/carousel";
+import { resolveUpload } from "./paths";
 
 /**
  * Slides to PNG, at the exact pixel size Instagram wants.
@@ -27,6 +28,14 @@ const MIME_BY_EXT: Record<string, string> = {
   ".gif": "image/gif",
 };
 
+/**
+ * When the app runs inside its desktop shell this points at a small local
+ * service backed by the Chromium that Electron already ships. Rendering there
+ * instead of shipping a second copy of Chromium takes ~670 MB off the
+ * installer. Running from source it is unset and Puppeteer does the work.
+ */
+const RENDER_SERVICE = process.env.FREECARRUSEL_RENDER_URL;
+
 let chrome: Browser | null = null;
 let rendersSinceLaunch = 0;
 
@@ -36,6 +45,9 @@ async function getBrowser(): Promise<Browser> {
     chrome = null;
   }
   if (!chrome || !chrome.isConnected()) {
+    // Imported lazily: a packaged build never reaches this path, so Puppeteer
+    // does not need to be on disk at all.
+    const puppeteer = (await import("puppeteer")).default;
     chrome = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
@@ -47,7 +59,6 @@ async function getBrowser(): Promise<Browser> {
 
 /** Replace every /uploads/... reference with the file's bytes. */
 async function embedImages(html: string): Promise<string> {
-  const publicDir = path.resolve(process.cwd(), "public");
   const referenced = new Set(
     [...html.matchAll(/(?:src=["']|url\(["']?)(\/uploads\/[^"'\s)]+)/g)].map(
       (m) => m[1]
@@ -57,7 +68,9 @@ async function embedImages(html: string): Promise<string> {
   let out = html;
   for (const webPath of referenced) {
     try {
-      const bytes = await readFile(path.join(publicDir, webPath));
+      const file = resolveUpload(webPath);
+      if (!file) continue;
+      const bytes = await readFile(file);
       const mime = MIME_BY_EXT[path.extname(webPath).toLowerCase()] ?? "image/png";
       out = out
         .split(webPath)
@@ -83,6 +96,47 @@ export async function exportSlide(
 
   const html = wrapSlideHtml(markup, aspectRatio, { inlineFontCss: fontCss });
 
+  const shot = RENDER_SERVICE
+    ? await renderViaService(html, width, height)
+    : await renderViaPuppeteer(html, width, height);
+
+  // Normalise to sRGB: Instagram assumes it, and a wide-gamut screenshot comes
+  // out visibly duller once uploaded.
+  return await sharp(shot).toColorspace("srgb").png().toBuffer();
+}
+
+/**
+ * Ask the desktop shell to paint the page and hand back the pixels. It renders
+ * in the Chromium that Electron already ships, which is why the installer does
+ * not carry a second copy of it.
+ */
+async function renderViaService(
+  html: string,
+  width: number,
+  height: number
+): Promise<Buffer> {
+  const response = await fetch(RENDER_SERVICE as string, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // Proves the request came from our own server, not from anything else
+      // that happened to find the port.
+      "X-Render-Token": process.env.FREECARRUSEL_RENDER_TOKEN ?? "",
+    },
+    body: JSON.stringify({ html, width, height }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Renderer answered ${response.status}: ${detail}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function renderViaPuppeteer(
+  html: string,
+  width: number,
+  height: number
+): Promise<Buffer> {
   const page = await (await getBrowser()).newPage();
   try {
     await page.setViewport({ width, height, deviceScaleFactor: 1 });
@@ -109,10 +163,7 @@ export async function exportSlide(
       clip: { x: 0, y: 0, width, height },
     });
     rendersSinceLaunch += 1;
-
-    // Normalise to sRGB: Instagram assumes it, and a wide-gamut screenshot
-    // comes out visibly duller once uploaded.
-    return await sharp(shot).toColorspace("srgb").png().toBuffer();
+    return Buffer.from(shot);
   } finally {
     await page.close().catch(() => {});
   }

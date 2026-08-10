@@ -1,0 +1,71 @@
+# Packaging for the desktop app.
+#
+# What ships: the Electron shell (desktop/) inside the asar, and Next's
+# standalone server as plain files in resources/ — main.js starts it from
+# there with `process.execPath`, so it has to stay unpacked and readable.
+appId: com.mateotorrandell.freecarrusel
+productName: freecarrusel
+copyright: Copyright © 2026 Mateo Torrandell
+
+directories:
+  output: dist-desktop
+  buildResources: build
+
+files:
+  - desktop/**/*
+  - package.json
+  - "!**/node_modules/**"
+
+# The whole standalone build lands at the root of resources/.
+# node_modules has to be named explicitly: electron-builder's default glob
+# skips it, and without it the packaged app starts with "Cannot find module
+# 'next'" — the server is there, its dependencies are not.
+extraResources:
+  - from: .next/standalone
+    to: .
+
+# Nothing here is generated at install time.
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+  # Unsigned for now: Windows will show a SmartScreen notice on first run.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: freecarrusel
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: build/icon.png
+  category: public.app-category.graphics-design
+  # Without a Developer ID the app is ad-hoc signed; Gatekeeper asks the user
+  # to confirm the first launch. Notarisation needs a paid Apple account.
+  identity: null
+  hardenedRuntime: false
+
+dmg:
+  title: freecarrusel
+  contents:
+    - x: 140
+      y: 200
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+linux:
+  target: [AppImage]
+  icon: build/icon.png
+  category: Graphics
