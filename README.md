@@ -20,6 +20,8 @@
 
 ## ⚠️ Status
 
+<!-- update channel: verified -->
+
 **freecarrusel is in active development.** It works end to end — you can go from a
 prompt to exported PNGs today — but the API surface, the on-disk format and parts
 of the editor still change between commits. Expect rough edges, and don't point it
