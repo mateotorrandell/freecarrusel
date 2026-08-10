@@ -86,7 +86,7 @@ function applyUpdate() {
   if (dirty) {
     // Someone has been editing the code. Overwriting that without asking would
     // be the worst thing this script could do.
-    say("  You have local changes, so nothing was touched.");
+    say(`  You have local changes (${dirty}), so nothing was touched.`);
     say("  Commit or stash them and try again.\n");
     return false;
   }
