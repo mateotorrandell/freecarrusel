@@ -52,3 +52,4 @@ freecarrusel*.log
 # OS
 Thumbs.db
 .update-requested
+.tmp/
