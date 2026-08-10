@@ -79,8 +79,15 @@ export async function getVersionStatus(): Promise<VersionStatus> {
   }
 
   // Uncommitted work means this is someone's working copy, and pulling over it
-  // is the one thing an updater must never do.
-  const dirty = (await git(["status", "--porcelain"]))?.length ?? 0;
+  // is the one thing an updater must never do. Two exceptions, both learned the
+  // hard way: package-lock.json is rewritten by the update itself, so counting
+  // it would make the first update the last one; and untracked files — a
+  // screenshot dropped in the folder — are not work a pull can destroy.
+  const changed = (await git(["status", "--porcelain", "--untracked-files=no"])) ?? "";
+  const dirty = changed
+    .split("\n")
+    .map((line) => line.slice(3).trim())
+    .filter((file) => file && file !== "package-lock.json").length;
 
   const behind =
     current && latest && current !== latest

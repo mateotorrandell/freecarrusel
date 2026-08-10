@@ -12,13 +12,15 @@
 // this supervisor sees the marker, pulls, installs, rebuilds, and starts again.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import readline from "node:readline";
 
 const ROOT = process.cwd();
 const UPDATE_MARKER = path.join(ROOT, ".update-requested");
+/** Which commit the current build came from. */
+const BUILD_STAMP = path.join(ROOT, ".next", ".built-from");
 const WINDOWS = process.platform === "win32";
 
 const say = (message) => console.log(message);
@@ -79,10 +81,23 @@ function applyUpdate() {
     return false;
   }
 
-  const dirty = spawnSync("git", ["status", "--porcelain"], {
-    cwd: ROOT,
-    encoding: "utf-8",
-  }).stdout?.trim();
+  // npm rewrites the lockfile while updating, so it is discarded rather than
+  // mistaken for the user's work — the pull brings the right one anyway.
+  run("git", ["checkout", "--", "package-lock.json"], { stdio: "ignore" });
+
+  // Only tracked files count. A screenshot someone left in the folder is not
+  // work a pull would destroy, and treating it as such blocked every update.
+  const dirty = (
+    spawnSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+      cwd: ROOT,
+      encoding: "utf-8",
+    }).stdout ?? ""
+  )
+    .split("\n")
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean)
+    .join(", ");
+
   if (dirty) {
     // Someone has been editing the code. Overwriting that without asking would
     // be the worst thing this script could do.
@@ -123,10 +138,40 @@ function serve(port) {
   return child;
 }
 
+function currentCommit() {
+  const out = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf-8",
+  });
+  return out.status === 0 ? out.stdout.trim() : null;
+}
+
+/**
+ * Rebuild when there is no build, or when the checkout has moved since the one
+ * we have. Someone may have run `git pull` by hand — serving the previous build
+ * after that is exactly what "the update did nothing" looks like.
+ */
+function needsBuild() {
+  if (!existsSync(path.join(ROOT, ".next", "BUILD_ID"))) return true;
+  const commit = currentCommit();
+  if (!commit) return false; // not a git checkout; nothing to compare against
+  const built = existsSync(BUILD_STAMP)
+    ? readFileSync(BUILD_STAMP, "utf-8").trim()
+    : null;
+  return built !== commit;
+}
+
+function build() {
+  if (run("npm", ["run", "build"]).status !== 0) return false;
+  const commit = currentCommit();
+  if (commit) writeFileSync(BUILD_STAMP, commit, "utf-8");
+  return true;
+}
+
 async function main() {
-  if (!existsSync(path.join(ROOT, ".next", "BUILD_ID"))) {
-    say("\n› first run: building the app (this takes a minute)\n");
-    if (run("npm", ["run", "build"]).status !== 0) {
+  if (needsBuild()) {
+    say("\n› building the app (this takes a minute)\n");
+    if (!build()) {
       say("\nThe build failed. Run `npm run doctor` to check your setup.\n");
       process.exit(1);
     }
