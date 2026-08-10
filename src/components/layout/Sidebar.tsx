@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { BrandPanel } from "@/components/brand/BrandPanel";
 import { Logo, LogoLockup } from "./Logo";
+import { UpdateNotice } from "./UpdateNotice";
 import { useSidebar } from "./sidebar-context";
 import { useLanguage } from "@/lib/i18n";
 import { LANGUAGES } from "@/types/settings";
@@ -133,6 +134,8 @@ export function Sidebar() {
           </div>
         )}
       </nav>
+
+      <UpdateNotice collapsed={!open} />
     </aside>
   );
 }

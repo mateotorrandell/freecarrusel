@@ -8,6 +8,14 @@ const STRINGS = {
   es: {
     menu: "Menú",
     home: "Inicio",
+    updateAvailable: "Hay una versión nueva",
+    updateReady: "Se instala sola y la app se reinicia.",
+    updateBehind: "Estás {n} cambios atrás. Se instala sola y la app se reinicia.",
+    updateWorking: "Actualizando… esto puede tardar un par de minutos. No cierres la ventana.",
+    updateFailed: "No se pudo actualizar. Fijate la ventana donde corrés la app.",
+    updateNow: "Actualizar ahora",
+    retry: "Reintentar",
+
     settings: "Configuración",
     myBrand: "Mi marca",
     language: "Idioma",
@@ -183,6 +191,14 @@ const STRINGS = {
   en: {
     menu: "Menu",
     home: "Home",
+    updateAvailable: "A new version is out",
+    updateReady: "It installs itself and the app restarts.",
+    updateBehind: "You are {n} changes behind. It installs itself and the app restarts.",
+    updateWorking: "Updating… this can take a couple of minutes. Leave this window open.",
+    updateFailed: "The update did not go through. Check the window running the app.",
+    updateNow: "Update now",
+    retry: "Try again",
+
     settings: "Settings",
     myBrand: "My brand",
     language: "Language",

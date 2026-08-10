@@ -28,14 +28,6 @@ const MIME_BY_EXT: Record<string, string> = {
   ".gif": "image/gif",
 };
 
-/**
- * When the app runs inside its desktop shell this points at a small local
- * service backed by the Chromium that Electron already ships. Rendering there
- * instead of shipping a second copy of Chromium takes ~670 MB off the
- * installer. Running from source it is unset and Puppeteer does the work.
- */
-const RENDER_SERVICE = process.env.FREECARRUSEL_RENDER_URL;
-
 let chrome: Browser | null = null;
 let rendersSinceLaunch = 0;
 
@@ -96,43 +88,14 @@ export async function exportSlide(
 
   const html = wrapSlideHtml(markup, aspectRatio, { inlineFontCss: fontCss });
 
-  const shot = RENDER_SERVICE
-    ? await renderViaService(html, width, height)
-    : await renderViaPuppeteer(html, width, height);
+  const shot = await renderPage(html, width, height);
 
   // Normalise to sRGB: Instagram assumes it, and a wide-gamut screenshot comes
   // out visibly duller once uploaded.
   return await sharp(shot).toColorspace("srgb").png().toBuffer();
 }
 
-/**
- * Ask the desktop shell to paint the page and hand back the pixels. It renders
- * in the Chromium that Electron already ships, which is why the installer does
- * not carry a second copy of it.
- */
-async function renderViaService(
-  html: string,
-  width: number,
-  height: number
-): Promise<Buffer> {
-  const response = await fetch(RENDER_SERVICE as string, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // Proves the request came from our own server, not from anything else
-      // that happened to find the port.
-      "X-Render-Token": process.env.FREECARRUSEL_RENDER_TOKEN ?? "",
-    },
-    body: JSON.stringify({ html, width, height }),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Renderer answered ${response.status}: ${detail}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
-
-async function renderViaPuppeteer(
+async function renderPage(
   html: string,
   width: number,
   height: number
