@@ -1,35 +1,35 @@
-import { NextResponse } from "next/server";
-import { listPresets, createPreset } from "@/lib/style-presets";
+import { badRequest, created, guard, ok, readJson, text } from "@/lib/http";
+import { createPreset, listPresets } from "@/lib/style-presets";
+import { DEFAULT_BRAND, type BrandConfig } from "@/types/brand";
+import { isAspectRatio } from "@/types/carousel";
+import type { StylePreset } from "@/types/style-preset";
 
 export async function GET() {
-  const presets = await listPresets();
-  return NextResponse.json({ presets });
+  return ok({ presets: await listPresets() });
 }
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { name, description, brand, designRules, exampleSlideHtml, aspectRatio, tags } = body;
+  return guard(async () => {
+    const body = await readJson<Partial<StylePreset> & { brand?: BrandConfig }>(
+      request
+    );
 
+    const name = text(body?.name);
+    const designRules = text(body?.designRules);
     if (!name || !designRules) {
-      return NextResponse.json(
-        { error: "name and designRules are required" },
-        { status: 400 }
-      );
+      return badRequest("Both name and designRules are required");
     }
 
-    const preset = await createPreset({
-      name,
-      description: description || "",
-      brand: brand || {},
-      designRules,
-      exampleSlideHtml: exampleSlideHtml || "",
-      aspectRatio: aspectRatio || "4:5",
-      tags: tags || [],
-    });
-
-    return NextResponse.json(preset, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    return created(
+      await createPreset({
+        name,
+        description: body?.description ?? "",
+        brand: body?.brand ?? DEFAULT_BRAND,
+        designRules,
+        exampleSlideHtml: body?.exampleSlideHtml ?? "",
+        aspectRatio: isAspectRatio(body?.aspectRatio) ? body.aspectRatio : "4:5",
+        tags: body?.tags ?? [],
+      })
+    );
+  });
 }

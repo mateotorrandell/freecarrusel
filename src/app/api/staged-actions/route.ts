@@ -1,59 +1,50 @@
-import { NextResponse } from "next/server";
-import { listStagedActions, createStagedAction } from "@/lib/staged-actions";
-import type { StagedActionType } from "@/types/staged-action";
+import { badRequest, created, guard, ok, readJson, text } from "@/lib/http";
+import { createStagedAction, listStagedActions } from "@/lib/staged-actions";
 
+/**
+ * The assistant can only stage ONE kind of side effect, and only with a .png
+ * name. This route is reachable by the agent, so it is written as a whitelist:
+ * anything not explicitly allowed is refused, rather than trying to enumerate
+ * what would be dangerous.
+ */
 export async function GET() {
-  const actions = await listStagedActions();
-  return NextResponse.json({ actions });
+  return ok({ actions: await listStagedActions() });
 }
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { type, fileName, content, description, carouselId, autoExecute } =
-      body as {
-        type?: StagedActionType;
-        fileName?: string;
-        content?: string;
-        description?: string;
-        carouselId?: string;
-        autoExecute?: boolean;
-      };
+  return guard(async () => {
+    const body = await readJson<Record<string, unknown>>(request);
+    if (!body) return badRequest();
 
-    // Only allow export_png type (security constraint)
-    if (type !== "export_png") {
-      return NextResponse.json(
-        { error: 'Only "export_png" action type is allowed' },
-        { status: 400 }
-      );
+    if (body.type !== "export_png") {
+      return badRequest('The only allowed action type is "export_png"');
     }
+
+    const fileName = text(body.fileName);
+    const content = text(body.content);
+    const description = text(body.description);
+    const carouselId = text(body.carouselId);
 
     if (!fileName || !content || !description || !carouselId) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return badRequest("fileName, content, description and carouselId are required");
     }
-
-    // Validate file extension
-    if (!fileName.endsWith(".png")) {
-      return NextResponse.json(
-        { error: "Only .png files are allowed" },
-        { status: 400 }
-      );
+    if (!fileName.toLowerCase().endsWith(".png")) {
+      return badRequest("Only .png files can be staged");
+    }
+    // A name is a name, never a path.
+    if (/[\/]|\.\./.test(fileName)) {
+      return badRequest("fileName cannot contain a path");
     }
 
     const action = await createStagedAction({
-      type,
+      type: "export_png",
       fileName,
       content,
       description,
       carouselId,
-      autoExecute,
+      autoExecute: body.autoExecute === true,
     });
 
-    return NextResponse.json({ action }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    return created({ action });
+  });
 }

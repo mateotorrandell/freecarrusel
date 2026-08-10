@@ -1,72 +1,75 @@
-import fs from "fs";
-import os from "os";
-import path from "path";
-import { spawnSync } from "child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 
-function buildCandidates(): string[] {
-  const home = os.homedir();
-  const candidates: string[] = [];
+/**
+ * Locate the Claude Code CLI, which the chat route spawns as a subprocess.
+ *
+ * Order matters: an explicit CLAUDE_CLI_PATH always wins, then the places each
+ * platform's installer actually puts the binary, and only then a PATH lookup —
+ * shelling out is the slow path and it runs on every health check.
+ */
+
+const DOCS = "https://docs.anthropic.com/en/docs/claude-code";
+
+function installLocations(): string[] {
+  const home = homedir();
 
   if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming");
-    const localAppData =
-      process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
-
-    candidates.push(
-      path.join(appData, "npm", "claude.cmd"),
-      path.join(appData, "npm", "claude.exe"),
-      path.join(localAppData, "Programs", "claude", "claude.exe"),
-      path.join(home, "AppData", "Roaming", "npm", "claude.cmd")
-    );
-  } else {
-    candidates.push(
-      path.join(home, ".local/bin/claude"),
-      "/usr/local/bin/claude",
-      "/opt/homebrew/bin/claude",
-      path.join(home, ".npm-global/bin/claude")
-    );
+    const roaming = process.env.APPDATA ?? path.join(home, "AppData", "Roaming");
+    const local = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
+    return [
+      path.join(roaming, "npm", "claude.cmd"),
+      path.join(roaming, "npm", "claude.exe"),
+      path.join(local, "Programs", "claude", "claude.exe"),
+    ];
   }
 
-  return candidates;
+  // macOS and Linux. Homebrew on Apple Silicon lives under /opt, on Intel
+  // under /usr/local, and npm's global prefix varies per setup.
+  return [
+    path.join(home, ".local", "bin", "claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    path.join(home, ".npm-global", "bin", "claude"),
+  ];
 }
 
-function probePath(): string | null {
+function lookupOnPath(): string | null {
+  const windows = process.platform === "win32";
   try {
-    const cmd = process.platform === "win32" ? "where" : "command";
-    const args = process.platform === "win32" ? ["claude"] : ["-v", "claude"];
-    const result = spawnSync(cmd, args, {
-      encoding: "utf-8",
-      shell: process.platform !== "win32",
-      timeout: 2000,
-    });
-    if (result.status === 0 && result.stdout) {
-      const first = result.stdout.split(/\r?\n/).find((l) => l.trim());
-      if (first && fs.existsSync(first.trim())) return first.trim();
-    }
+    const result = spawnSync(
+      windows ? "where" : "command",
+      windows ? ["claude"] : ["-v", "claude"],
+      { encoding: "utf-8", shell: !windows, timeout: 2000 }
+    );
+    if (result.status !== 0 || !result.stdout) return null;
+    // `where` can return several matches, one per line.
+    const first = result.stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+    return first && existsSync(first) ? first : null;
   } catch {
-    // ignore
+    return null;
   }
-  return null;
 }
 
 export function findClaudePath(): string | null {
-  if (process.env.CLAUDE_CLI_PATH && fs.existsSync(process.env.CLAUDE_CLI_PATH)) {
-    return process.env.CLAUDE_CLI_PATH;
-  }
-  for (const candidate of buildCandidates()) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return probePath();
-}
+  const configured = process.env.CLAUDE_CLI_PATH;
+  if (configured && existsSync(configured)) return configured;
 
-export function getClaudePath(): string {
-  const found = findClaudePath();
-  if (found) return found;
-  throw new Error(
-    "Claude CLI not found. Install it from https://docs.anthropic.com/en/docs/claude-code or set CLAUDE_CLI_PATH in .env.local"
-  );
+  const installed = installLocations().find((candidate) => existsSync(candidate));
+  return installed ?? lookupOnPath();
 }
 
 export function isClaudeAvailable(): boolean {
   return findClaudePath() !== null;
+}
+
+/** Same as findClaudePath, for callers that cannot continue without it. */
+export function getClaudePath(): string {
+  const found = findClaudePath();
+  if (found) return found;
+  throw new Error(
+    `Claude CLI not found. Install it (${DOCS}) or set CLAUDE_CLI_PATH in .env.local`
+  );
 }

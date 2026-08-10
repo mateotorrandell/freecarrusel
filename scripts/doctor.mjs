@@ -1,117 +1,126 @@
 #!/usr/bin/env node
-// Open Carrusel — environment diagnostic.
-// Pure Node, no dependencies, safe to run pre-`npm install`.
-// Exit 0 if everything required is OK; exit 1 on any required failure.
+// Environment check. Answers one question: can this machine run freecarrusel?
+//
+// Dependency-free and safe to run before `npm install`, because the most
+// common reason someone lands here is that the install itself went wrong.
+//
+// Exit code 0 when everything required is in place, 1 otherwise.
 
-import { existsSync, statSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 
-const CHECK = "✓";
-const FAIL = "✗";
-const INFO = "○";
-const WARN = "!";
+const WINDOWS = platform() === "win32";
+const MARK = { pass: "✓", fail: "✗", note: "○", warn: "!" };
 
-const checks = [];
-let hardFailures = 0;
+const results = [];
+let blocking = 0;
 
-function add(symbol, label, detail, fatal = false) {
-  checks.push({ symbol, label, detail });
-  if (fatal && symbol === FAIL) hardFailures += 1;
-}
+const report = (state, label, detail, required = false) => {
+  results.push({ state, label, detail });
+  if (required && state === "fail") blocking += 1;
+};
 
-function tryExec(cmd) {
+const run = (file, args) => {
   try {
-    return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    return execFileSync(file, args, {
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: !WINDOWS,
+    })
+      .toString()
+      .trim();
   } catch {
     return null;
   }
-}
+};
 
-// 1. Node version
-const major = Number(process.versions.node.split(".")[0]);
-if (major >= 20) {
-  add(CHECK, "Node", `v${process.versions.node}`);
-} else {
-  add(FAIL, "Node", `v${process.versions.node} (need ≥20 — install from https://nodejs.org)`, true);
-}
+// ---- Node ------------------------------------------------------------------
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+report(
+  nodeMajor >= 20 ? "pass" : "fail",
+  "Node",
+  nodeMajor >= 20
+    ? `v${process.versions.node}`
+    : `v${process.versions.node} — 20 or newer required (nodejs.org)`,
+  true
+);
 
-// 2. Claude CLI
-const claudeEnv = process.env.CLAUDE_CLI_PATH;
-const candidates = [
-  claudeEnv,
-  join(homedir(), ".local/bin/claude"),
-  "/usr/local/bin/claude",
-  "/opt/homebrew/bin/claude",
-  join(homedir(), ".npm-global/bin/claude"),
+// ---- Claude Code CLI -------------------------------------------------------
+const cliCandidates = [
+  process.env.CLAUDE_CLI_PATH,
+  ...(WINDOWS
+    ? [
+        path.join(process.env.APPDATA ?? "", "npm", "claude.cmd"),
+        path.join(process.env.LOCALAPPDATA ?? "", "Programs", "claude", "claude.exe"),
+      ]
+    : [
+        path.join(homedir(), ".local", "bin", "claude"),
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+        path.join(homedir(), ".npm-global", "bin", "claude"),
+      ]),
 ].filter(Boolean);
 
-let claudePath = null;
-const which = tryExec(platform() === "win32" ? "where claude" : "command -v claude");
-if (which) claudePath = which.split("\n")[0];
-if (!claudePath) {
-  for (const c of candidates) {
-    if (existsSync(c)) {
-      claudePath = c;
-      break;
-    }
+const onPath = WINDOWS ? run("where", ["claude"]) : run("command", ["-v", "claude"]);
+const cli =
+  (onPath && onPath.split(/\r?\n/)[0].trim()) ||
+  cliCandidates.find((candidate) => existsSync(candidate)) ||
+  null;
+
+if (cli) {
+  const version = run(cli, ["--version"]);
+  report("pass", "Claude CLI", version ? `${version} — ${cli}` : cli);
+} else {
+  report(
+    "fail",
+    "Claude CLI",
+    "not found — `npm i -g @anthropic-ai/claude-code`, then `npm run setup`",
+    true
+  );
+}
+
+// ---- Project ---------------------------------------------------------------
+report(
+  existsSync(path.resolve("node_modules")) ? "pass" : "fail",
+  "Dependencies",
+  existsSync(path.resolve("node_modules")) ? "installed" : "run `npm install`",
+  true
+);
+
+for (const dir of ["data", path.join("public", "uploads")]) {
+  const full = path.resolve(dir);
+  if (!existsSync(full)) {
+    report("note", dir, "will be created on first use");
+    continue;
+  }
+  try {
+    accessSync(full, constants.W_OK);
+    report("pass", dir, "writable");
+  } catch {
+    report("fail", dir, "exists but is not writable", true);
   }
 }
-if (claudePath) {
-  add(CHECK, "Claude CLI", claudePath);
-} else {
-  add(FAIL, "Claude CLI", "not found — install from https://docs.anthropic.com/en/docs/claude-code", true);
-}
 
-// 3. Dependencies
-if (existsSync("node_modules") && statSync("node_modules").isDirectory()) {
-  add(CHECK, "Dependencies", "node_modules present");
-} else {
-  add(FAIL, "Dependencies", "node_modules missing — run `/start` or `npm install`", true);
-}
+// Chromium ships with Puppeteer; without it the PNG export cannot run.
+report(
+  existsSync(path.resolve("node_modules", "puppeteer")) ? "pass" : "warn",
+  "PNG export",
+  existsSync(path.resolve("node_modules", "puppeteer"))
+    ? "Puppeteer present"
+    : "Puppeteer missing — export will fail"
+);
 
-// 4. Data files
-const dataFiles = ["brand.json", "carousels.json", "templates.json", "staged-actions.json", "style-presets.json"];
-const missingData = dataFiles.filter((f) => !existsSync(join("data", f)));
-if (missingData.length === 0) {
-  add(CHECK, "Data files", "all 5 seeded");
-} else if (missingData.length === dataFiles.length) {
-  add(FAIL, "Data files", "none seeded — run `/start` or `npm run setup`", true);
-} else {
-  add(WARN, "Data files", `${missingData.length} missing: ${missingData.join(", ")} — run /start`);
-}
-
-// 5. Port 3000
-let portStatus = "free";
-let portFree = true;
-if (platform() !== "win32") {
-  const pid = tryExec("lsof -ti :3000");
-  if (pid) {
-    portStatus = `in use by PID ${pid.split("\n")[0]} — \`/stop\` to kill`;
-    portFree = false;
-  }
-} else {
-  // Best-effort on Windows; non-fatal
-  const out = tryExec("netstat -ano -p tcp");
-  if (out && /:3000\s+.+LISTENING/i.test(out)) {
-    portStatus = "in use (run `netstat -ano | findstr :3000` for details)";
-    portFree = false;
-  }
-}
-add(portFree ? CHECK : INFO, "Port 3000", portStatus);
-
-// Output
-const labelWidth = Math.max(...checks.map((c) => c.label.length));
+// ---- Output ----------------------------------------------------------------
+const width = Math.max(...results.map((r) => r.label.length));
 console.log("");
-for (const { symbol, label, detail } of checks) {
-  console.log(`  ${symbol}  ${label.padEnd(labelWidth)}   ${detail}`);
+for (const { state, label, detail } of results) {
+  console.log(`  ${MARK[state]}  ${label.padEnd(width)}  ${detail}`);
 }
 console.log("");
 
-if (hardFailures > 0) {
-  console.log(`  ${hardFailures} required check${hardFailures > 1 ? "s" : ""} failed.`);
+if (blocking > 0) {
+  console.log(`  ${blocking} problem${blocking > 1 ? "s" : ""} to fix before starting.\n`);
   process.exit(1);
-} else {
-  process.exit(0);
 }
+console.log("  Ready. Start it with `npm run dev`.\n");

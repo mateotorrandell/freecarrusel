@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getPreset, deletePreset } from "@/lib/style-presets";
+import { guard, noContent, notFound, ok } from "@/lib/http";
+import { deletePreset, getPreset } from "@/lib/style-presets";
 
 export async function GET(
   _request: Request,
@@ -7,10 +7,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const preset = await getPreset(id);
-  if (!preset) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json(preset);
+  return preset ? ok(preset) : notFound("Style preset not found");
 }
 
 export async function DELETE(
@@ -18,9 +15,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deleted = await deletePreset(id);
-  if (!deleted) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json({ success: true });
+  return guard(async () =>
+    (await deletePreset(id)) ? noContent() : notFound("Style preset not found")
+  );
 }

@@ -1,17 +1,15 @@
-import { NextResponse } from "next/server";
 import { getBrand, updateBrand } from "@/lib/brand";
+import { badRequest, guard, ok, readJson } from "@/lib/http";
+import type { BrandConfig } from "@/types/brand";
 
 export async function GET() {
-  const brand = await getBrand();
-  return NextResponse.json(brand);
+  return ok(await getBrand());
 }
 
 export async function PUT(request: Request) {
-  try {
-    const body = await request.json();
-    const updated = await updateBrand(body);
-    return NextResponse.json(updated);
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+  return guard(async () => {
+    const patch = await readJson<Partial<BrandConfig>>(request);
+    if (!patch || typeof patch !== "object") return badRequest();
+    return ok(await updateBrand(patch));
+  });
 }

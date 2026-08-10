@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Type,
   Square,
@@ -68,8 +68,63 @@ export function LayersPanel({
   onRemove,
 }: LayersPanelProps) {
   const { t } = useLanguage();
-  const [dragUid, setDragUid] = useState<string | null>(null);
+  // Reordering runs on plain pointer events, not HTML5 drag-and-drop. The
+  // native API kept firing dragstart and dragover and then ending in dragend
+  // with no drop at all once the pointer crossed more than one row — the list
+  // re-renders as the indicator moves and the browser abandons a drag whose
+  // target went away. Pointer events have no such contract to lose.
+  const drag = useRef<{ uid: string; y: number; active: boolean } | null>(null);
   const [over, setOver] = useState<{ uid: string; above: boolean } | null>(null);
+  const rows = useRef(new Map<string, HTMLElement>());
+
+  /** Which row the pointer is on, and whether it's the front or back half. */
+  const rowAt = (clientY: number) => {
+    for (const [uid, el] of rows.current) {
+      const box = el.getBoundingClientRect();
+      if (clientY >= box.top && clientY <= box.bottom) {
+        return { uid, above: clientY < box.top + box.height / 2 };
+      }
+    }
+    return null;
+  };
+
+  const onDown = (e: React.MouseEvent) => {
+    // Buttons inside a row (eye, trash, arrows, the label itself) keep working:
+    // a press only becomes a drag once the pointer actually travels.
+    const target = rowAt(e.clientY);
+    if (!target || e.button !== 0) return;
+    drag.current = { uid: target.uid, y: e.clientY, active: false };
+
+    const move = (ev: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      if (!d.active && Math.abs(ev.clientY - d.y) < 5) return;
+      d.active = true;
+      ev.preventDefault();
+      const at = rowAt(ev.clientY);
+      setOver((o) =>
+        !at || at.uid === d.uid
+          ? null
+          : o?.uid === at.uid && o.above === at.above
+            ? o
+            : at
+      );
+    };
+
+    const up = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      const d = drag.current;
+      drag.current = null;
+      setOver(null);
+      if (!d?.active) return; // a click, not a drag — let it select
+      const at = rowAt(ev.clientY);
+      if (at && at.uid !== d.uid) onReorder(d.uid, at.uid, at.above);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   const fallback: Record<LayerKind, string> = {
     text: t("layerText"),
@@ -89,7 +144,7 @@ export function LayersPanel({
   }
 
   return (
-    <div className="py-1">
+    <div className="py-1" onMouseDown={onDown}>
       {layers.map((l) => {
         const Icon = ICONS[l.kind] ?? Square;
         const active = l.uid === selectedUid;
@@ -97,35 +152,13 @@ export function LayersPanel({
         return (
           <div
             key={l.uid}
-            draggable
-            onDragStart={(e) => {
-              setDragUid(l.uid);
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onDragEnd={() => {
-              setDragUid(null);
-              setOver(null);
-            }}
-            onDragOver={(e) => {
-              if (!dragUid || dragUid === l.uid) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              const box = e.currentTarget.getBoundingClientRect();
-              setOver({ uid: l.uid, above: e.clientY < box.top + box.height / 2 });
-            }}
-            onDragLeave={() => setOver((o) => (o?.uid === l.uid ? null : o))}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (dragUid && dragUid !== l.uid) {
-                const box = e.currentTarget.getBoundingClientRect();
-                onReorder(dragUid, l.uid, e.clientY < box.top + box.height / 2);
-              }
-              setDragUid(null);
-              setOver(null);
+            ref={(el) => {
+              if (el) rows.current.set(l.uid, el);
+              else rows.current.delete(l.uid);
             }}
             className={`group flex items-center gap-1 pr-1.5 transition-colors cursor-grab active:cursor-grabbing ${
               active ? "bg-accent/10" : "hover:bg-muted"
-            } ${dragUid === l.uid ? "opacity-40" : ""}`}
+            }`}
             style={{
               boxShadow:
                 marker === true

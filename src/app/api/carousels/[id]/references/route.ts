@@ -1,7 +1,22 @@
-import { NextResponse } from "next/server";
-import path from "path";
-import { addReferenceImage, removeReferenceImage, getCarousel } from "@/lib/carousels";
+import path from "node:path";
+import {
+  addReferenceImage,
+  getCarousel,
+  removeReferenceImage,
+} from "@/lib/carousels";
+import {
+  badRequest,
+  created,
+  guard,
+  noContent,
+  notFound,
+  ok,
+  readJson,
+  text,
+} from "@/lib/http";
 import { generateId, now } from "@/lib/utils";
+
+const UPLOADS = "/uploads/";
 
 export async function GET(
   _request: Request,
@@ -9,44 +24,48 @@ export async function GET(
 ) {
   const { id } = await params;
   const carousel = await getCarousel(id);
-  if (!carousel) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json({ references: carousel.referenceImages || [] });
+  return carousel
+    ? ok({ references: carousel.referenceImages ?? [] })
+    : notFound("Carousel not found");
 }
 
+/**
+ * Attach an already-uploaded image to a carousel.
+ *
+ * The URL is restricted to /uploads/ and rejected if it contains any traversal:
+ * the assistant calls this route, and `absPath` is handed straight back to it
+ * as a file to open. Without the guard, a crafted url would turn this into a
+ * "read me any file on the machine" endpoint.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  try {
-    const body = await request.json();
-    const { url, name } = body as { url?: string; name?: string };
+  return guard(async () => {
+    const body = await readJson<{ url?: string; name?: string }>(request);
+    const url = text(body?.url);
 
-    if (!url || typeof url !== "string") {
-      return NextResponse.json({ error: "url is required" }, { status: 400 });
+    if (!url || !url.startsWith(UPLOADS) || url.includes("..")) {
+      return badRequest(`url must be a path under ${UPLOADS}`);
     }
 
-    const absPath = path.resolve(process.cwd(), "public", url.replace(/^\//, ""));
+    const publicDir = path.resolve(process.cwd(), "public");
+    const absPath = path.resolve(publicDir, `.${url}`);
+    if (!absPath.startsWith(publicDir)) {
+      return badRequest("url resolves outside the uploads folder");
+    }
 
-    const ref = {
+    const carousel = await addReferenceImage(id, {
       id: generateId(),
       url,
       absPath,
-      name: name || "Reference image",
+      name: text(body?.name) ?? path.basename(url),
       addedAt: now(),
-    };
+    });
 
-    const result = await addReferenceImage(id, ref);
-    if (!result) {
-      return NextResponse.json({ error: "Carousel not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(result, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    return carousel ? created(carousel) : notFound("Carousel not found");
+  });
 }
 
 export async function DELETE(
@@ -54,20 +73,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  try {
-    const { searchParams } = new URL(request.url);
-    const imageId = searchParams.get("imageId");
-    if (!imageId) {
-      return NextResponse.json({ error: "imageId is required" }, { status: 400 });
-    }
+  return guard(async () => {
+    const imageId = new URL(request.url).searchParams.get("imageId");
+    if (!imageId) return badRequest("imageId is required");
 
-    const deleted = await removeReferenceImage(id, imageId);
-    if (!deleted) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    const removed = await removeReferenceImage(id, imageId);
+    return removed ? noContent() : notFound("Image not found");
+  });
 }

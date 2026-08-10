@@ -380,9 +380,4 @@ process, so the rest of the app stays responsive while it works.
 
 ## License
 
-[MIT](./LICENSE).
-
-freecarrusel began as a fork of an MIT-licensed project and has been substantially
-rewritten — the editor, the layer model, the brand pipeline and most of the UI are
-new. Portions of the original remain, and the original copyright notice is
-retained in `LICENSE` as that license requires.
+[MIT](./LICENSE) — use it, change it, ship it.

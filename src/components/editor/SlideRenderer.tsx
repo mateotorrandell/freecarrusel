@@ -1,61 +1,65 @@
 "use client";
 
-import { useMemo, useRef, useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { wrapSlideHtml } from "@/lib/slide-html";
-import type { AspectRatio } from "@/types/carousel";
-import { DIMENSIONS } from "@/types/carousel";
+import { DIMENSIONS, type AspectRatio } from "@/types/carousel";
 
-interface SlideRendererProps {
-  html: string;
-  aspectRatio: AspectRatio;
-  className?: string;
-  style?: React.CSSProperties;
-}
-
+/**
+ * Read-only view of a slide, scaled to fit whatever box it is given.
+ *
+ * The slide renders at its true size (1080 wide) inside an iframe and is scaled
+ * with a transform, rather than being re-laid-out smaller. That way a thumbnail
+ * and the exported PNG are the same composition — type doesn't reflow, and a
+ * headline that fits here fits there.
+ *
+ * `sandbox=""` with no tokens: no scripts, no forms, no navigation. This is the
+ * viewer, not the editor.
+ */
 export function SlideRenderer({
   html,
   aspectRatio,
   className,
   style,
-}: SlideRendererProps) {
-  const outerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const { width: slideW, height: slideH } = DIMENSIONS[aspectRatio];
+}: {
+  html: string;
+  aspectRatio: AspectRatio;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState({ width: 0, height: 0 });
+  const { width: nativeW, height: nativeH } = DIMENSIONS[aspectRatio];
 
-  const srcDoc = useMemo(
+  const document = useMemo(
     () => wrapSlideHtml(html, aspectRatio),
     [html, aspectRatio]
   );
 
   const measure = useCallback(() => {
-    const el = outerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      setDims({ w: rect.width, h: rect.height });
+    const box = hostRef.current?.getBoundingClientRect();
+    if (box && box.width > 0 && box.height > 0) {
+      setAvailable({ width: box.width, height: box.height });
     }
   }, []);
 
   useEffect(() => {
-    const el = outerRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver(() => measure());
-    obs.observe(el);
-    measure();
-    return () => obs.disconnect();
+    const host = hostRef.current;
+    if (!host) return;
+    // ResizeObserver reports the current size as soon as it starts observing,
+    // so there is no need to measure by hand first — doing that set state
+    // during the effect and triggered a second render for nothing.
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
   }, [measure]);
 
-  // Calculate scale to fit the slide into the container
-  const scale = dims
-    ? Math.min(dims.w / slideW, dims.h / slideH)
+  const scale = available.width
+    ? Math.min(available.width / nativeW, available.height / nativeH)
     : 0;
-
-  const scaledW = Math.floor(slideW * scale);
-  const scaledH = Math.floor(slideH * scale);
 
   return (
     <div
-      ref={outerRef}
+      ref={hostRef}
       className={className}
       style={{
         position: "relative",
@@ -68,29 +72,29 @@ export function SlideRenderer({
       {scale > 0 && (
         <div
           style={{
-            width: scaledW,
-            height: scaledH,
+            position: "relative",
+            width: Math.floor(nativeW * scale),
+            height: Math.floor(nativeH * scale),
             overflow: "hidden",
             borderRadius: 8,
-            position: "relative",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)",
-            border: "1px solid rgba(0,0,0,0.06)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            boxShadow: "0 4px 24px rgba(0,0,0,0.35)",
           }}
         >
           <iframe
             sandbox=""
-            srcDoc={srcDoc}
-            title="Slide preview"
+            srcDoc={document}
+            title="Slide"
+            tabIndex={-1}
             style={{
-              width: slideW,
-              height: slideH,
+              position: "absolute",
+              inset: 0,
+              width: nativeW,
+              height: nativeH,
               border: "none",
+              pointerEvents: "none",
               transform: `scale(${scale})`,
               transformOrigin: "top left",
-              position: "absolute",
-              top: 0,
-              left: 0,
-              pointerEvents: "none",
             }}
           />
         </div>

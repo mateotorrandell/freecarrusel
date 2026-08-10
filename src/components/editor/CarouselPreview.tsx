@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SlideRenderer } from "./SlideRenderer";
@@ -25,10 +25,13 @@ export function CarouselPreview({
 }: CarouselPreviewProps) {
   const { t } = useLanguage();
   const slide = slides[activeIndex];
-  const prevIndexRef = useRef(activeIndex);
-  const direction = activeIndex >= prevIndexRef.current ? 12 : -12;
+  // Which way the new slide flies in. Held in state, not a ref: a ref read
+  // during render is stale on any pass React decides to discard, and the
+  // animation then points the wrong way.
+  const [seen, setSeen] = useState(activeIndex);
+  const direction = activeIndex >= seen ? 12 : -12;
   useEffect(() => {
-    prevIndexRef.current = activeIndex;
+    setSeen(activeIndex);
   }, [activeIndex]);
 
   if (!slide) {

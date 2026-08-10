@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getTemplate, deleteTemplate } from "@/lib/templates";
+import { deleteTemplate, getTemplate } from "@/lib/templates";
+import { guard, noContent, notFound, ok } from "@/lib/http";
 
 export async function GET(
   _request: Request,
@@ -7,10 +7,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const template = await getTemplate(id);
-  if (!template) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json(template);
+  return template ? ok(template) : notFound("Template not found");
 }
 
 export async function DELETE(
@@ -18,9 +15,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deleted = await deleteTemplate(id);
-  if (!deleted) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json({ success: true });
+  return guard(async () =>
+    (await deleteTemplate(id)) ? noContent() : notFound("Template not found")
+  );
 }

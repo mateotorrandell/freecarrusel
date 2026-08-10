@@ -21,6 +21,7 @@ import { SlideRenderer } from "@/components/editor/SlideRenderer";
 import { TemplateGallery } from "@/components/templates/TemplateGallery";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ResizablePanel } from "@/components/layout/ResizablePanel";
+import { Logo } from "@/components/layout/Logo";
 import { useLanguage } from "@/lib/i18n";
 import type { Carousel, AspectRatio } from "@/types/carousel";
 import type { BrandConfig } from "@/types/brand";
@@ -282,7 +283,11 @@ export default function DashboardPage() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
-            <Layers className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            {/* The mark, not a generic stack icon: an empty screen is the
+                first thing a new user sees. */}
+            <span className="mb-5 opacity-70">
+              <Logo size={52} />
+            </span>
             <h2 className="text-lg font-semibold mb-2">{t("noCarousels")}</h2>
             <p className="text-sm text-muted-foreground mb-6 max-w-md">
               {t("noCarouselsHint")}

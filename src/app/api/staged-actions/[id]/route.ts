@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { badRequest, guard, notFound, ok, readJson } from "@/lib/http";
 import { getStagedAction, updateStagedActionStatus } from "@/lib/staged-actions";
 
 export async function GET(
@@ -7,31 +7,24 @@ export async function GET(
 ) {
   const { id } = await params;
   const action = await getStagedAction(id);
-  if (!action) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json(action);
+  return action ? ok(action) : notFound("Action not found");
 }
 
+/**
+ * Rejecting is the only transition open to the client. Approving and executing
+ * belong to the server, so a stray request can't drive work by itself.
+ */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  try {
-    const body = await request.json();
-    const { status } = body as { status?: string };
-
-    if (status === "rejected") {
-      const updated = await updateStagedActionStatus(id, "rejected");
-      if (!updated) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      return NextResponse.json(updated);
+  return guard(async () => {
+    const body = await readJson<{ status?: string }>(request);
+    if (body?.status !== "rejected") {
+      return badRequest('The only accepted status is "rejected"');
     }
-
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    const updated = await updateStagedActionStatus(id, "rejected");
+    return updated ? ok(updated) : notFound("Action not found");
+  });
 }

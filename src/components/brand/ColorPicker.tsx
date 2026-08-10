@@ -2,37 +2,44 @@
 
 import { Input } from "@/components/ui/input";
 
-interface ColorPickerProps {
+/**
+ * A swatch and a hex field for the same colour. The native picker is stretched
+ * invisibly over the swatch so the whole square is clickable, which is a much
+ * bigger target than the browser's own control.
+ */
+export function ColorPicker({
+  label,
+  value,
+  onChange,
+}: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-}
-
-export function ColorPicker({ label, value, onChange }: ColorPickerProps) {
+}) {
   return (
     <div className="flex items-center gap-3">
-      <div className="relative">
+      <div className="relative h-9 w-9 shrink-0">
         <input
           type="color"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          aria-label={`${label} color`}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          aria-label={label}
         />
         <div
-          className="h-9 w-9 rounded-lg border border-border shadow-sm cursor-pointer"
+          className="h-9 w-9 rounded-lg border border-border shadow-sm"
           style={{ backgroundColor: value }}
         />
       </div>
-      <div className="flex-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          {label}
-        </label>
+
+      <div className="min-w-0 flex-1">
+        <label className="text-xs font-medium text-muted-foreground">{label}</label>
         <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-8 text-xs font-mono mt-0.5"
+          className="mt-0.5 h-8 font-mono text-xs"
           placeholder="#000000"
+          spellCheck={false}
         />
       </div>
     </div>

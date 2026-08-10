@@ -1,149 +1,144 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import puppeteer, { type Browser } from "puppeteer";
-import { readFile } from "fs/promises";
-import path from "path";
 import sharp from "sharp";
-import { wrapSlideHtml, extractFontFamilies } from "./slide-html";
+import { extractFontFamilies, wrapSlideHtml } from "./slide-html";
 import { getInlinedFontCSS } from "./fonts";
-import type { Slide, AspectRatio } from "@/types/carousel";
-import { DIMENSIONS } from "@/types/carousel";
+import { DIMENSIONS, type AspectRatio, type Slide } from "@/types/carousel";
 
-// Singleton browser with lifecycle management
-let browser: Browser | null = null;
-let exportCount = 0;
-const MAX_EXPORTS_BEFORE_RESTART = 50;
+/**
+ * Slides to PNG, at the exact pixel size Instagram wants.
+ *
+ * The document handed to the browser is made SELF-CONTAINED first — fonts and
+ * images become data: URIs — so a render never depends on the network or on
+ * the dev server still being up. Without that, an export can quietly come back
+ * with a fallback typeface or an empty image box and still look like a success.
+ */
+
+const CONCURRENT_PAGES = 3;
+/** Chromium leaks a little per page; recycle it rather than watch it grow. */
+const PAGES_BEFORE_RESTART = 50;
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
+let chrome: Browser | null = null;
+let rendersSinceLaunch = 0;
 
 async function getBrowser(): Promise<Browser> {
-  if (browser && exportCount >= MAX_EXPORTS_BEFORE_RESTART) {
-    await browser.close().catch(() => {});
-    browser = null;
-    exportCount = 0;
+  if (chrome && rendersSinceLaunch >= PAGES_BEFORE_RESTART) {
+    await chrome.close().catch(() => {});
+    chrome = null;
   }
-  if (!browser || !browser.isConnected()) {
-    browser = await puppeteer.launch({
+  if (!chrome || !chrome.isConnected()) {
+    chrome = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
     });
-    exportCount = 0;
+    rendersSinceLaunch = 0;
   }
-  return browser;
+  return chrome;
 }
 
-/**
- * Inline all image references in slide HTML.
- * Replaces /uploads/xxx.png paths with data: URIs.
- */
-async function inlineImages(html: string): Promise<string> {
-  const uploadDir = path.resolve(process.cwd(), "public");
-  const imgRegex = /(?:src=["']|url\(["']?)(\/uploads\/[^"'\s)]+)/g;
-  const matches = [...html.matchAll(imgRegex)];
+/** Replace every /uploads/... reference with the file's bytes. */
+async function embedImages(html: string): Promise<string> {
+  const publicDir = path.resolve(process.cwd(), "public");
+  const referenced = new Set(
+    [...html.matchAll(/(?:src=["']|url\(["']?)(\/uploads\/[^"'\s)]+)/g)].map(
+      (m) => m[1]
+    )
+  );
 
-  let result = html;
-  for (const match of matches) {
-    const imgPath = match[1];
+  let out = html;
+  for (const webPath of referenced) {
     try {
-      const fullPath = path.join(uploadDir, imgPath);
-      const buffer = await readFile(fullPath);
-      const ext = path.extname(imgPath).toLowerCase();
-      const mime =
-        ext === ".png"
-          ? "image/png"
-          : ext === ".jpg" || ext === ".jpeg"
-            ? "image/jpeg"
-            : "image/webp";
-      const base64 = buffer.toString("base64");
-      result = result.replace(imgPath, `data:${mime};base64,${base64}`);
+      const bytes = await readFile(path.join(publicDir, webPath));
+      const mime = MIME_BY_EXT[path.extname(webPath).toLowerCase()] ?? "image/png";
+      out = out
+        .split(webPath)
+        .join(`data:${mime};base64,${bytes.toString("base64")}`);
     } catch {
-      // Keep original path — Puppeteer can fetch from localhost
+      // Missing file: leave the path so the failure is visible in the PNG
+      // rather than silently producing a blank area.
     }
   }
-
-  return result;
+  return out;
 }
 
-/**
- * Export a single slide to PNG buffer.
- */
 export async function exportSlide(
   slide: Slide,
   aspectRatio: AspectRatio
 ): Promise<Buffer> {
   const { width, height } = DIMENSIONS[aspectRatio];
 
-  // Get inlined font CSS
-  const fontFamilies = extractFontFamilies(slide.html);
-  const inlinedFontCss = await getInlinedFontCSS(fontFamilies);
+  const [fontCss, markup] = await Promise.all([
+    getInlinedFontCSS(extractFontFamilies(slide.html)),
+    embedImages(slide.html),
+  ]);
 
-  // Inline images
-  const inlinedHtml = await inlineImages(slide.html);
+  const html = wrapSlideHtml(markup, aspectRatio, { inlineFontCss: fontCss });
 
-  // Build self-contained HTML
-  const fullHtml = wrapSlideHtml(inlinedHtml, aspectRatio, {
-    inlineFontCss: inlinedFontCss,
-  });
-
-  const br = await getBrowser();
-  const page = await br.newPage();
-
+  const page = await (await getBrowser()).newPage();
   try {
     await page.setViewport({ width, height, deviceScaleFactor: 1 });
-    await page.setContent(fullHtml, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await page.setContent(html, {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    });
 
-    // Wait for fonts to be ready
+    // Screenshotting before the faces are ready captures the fallback font.
     await page
       .waitForFunction(
         () =>
           document.fonts.ready.then(() =>
-            [...document.fonts].every((f) => f.status === "loaded")
+            [...document.fonts].every((face) => face.status === "loaded")
           ),
-        { timeout: 10000 }
+        { timeout: 10_000 }
       )
       .catch(() => {
-        // Font loading timeout — proceed with whatever loaded
+        /* a slow font shouldn't block the whole export */
       });
 
-    const screenshotBuffer = await page.screenshot({
+    const shot = await page.screenshot({
       type: "png",
       clip: { x: 0, y: 0, width, height },
     });
+    rendersSinceLaunch += 1;
 
-    exportCount++;
-
-    // Post-process with Sharp: enforce sRGB
-    const processed = await sharp(screenshotBuffer)
-      .toColorspace("srgb")
-      .png()
-      .toBuffer();
-
-    return processed;
+    // Normalise to sRGB: Instagram assumes it, and a wide-gamut screenshot
+    // comes out visibly duller once uploaded.
+    return await sharp(shot).toColorspace("srgb").png().toBuffer();
   } finally {
     await page.close().catch(() => {});
   }
 }
 
-/**
- * Export all slides of a carousel to PNG buffers.
- * Processes up to 3 slides concurrently.
- */
 export async function exportAllSlides(
   slides: Slide[],
   aspectRatio: AspectRatio,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (done: number, total: number) => void
 ): Promise<{ name: string; buffer: Buffer }[]> {
-  const results: { name: string; buffer: Buffer }[] = [];
-  const CONCURRENCY = 3;
+  const files: { name: string; buffer: Buffer }[] = [];
+  let done = 0;
 
-  for (let i = 0; i < slides.length; i += CONCURRENCY) {
-    const batch = slides.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map(async (slide, batchIdx) => {
-        const idx = i + batchIdx;
+  // A few pages at a time: one at a time is slow, all at once starves the
+  // machine and the renders start timing out.
+  for (let start = 0; start < slides.length; start += CONCURRENT_PAGES) {
+    const batch = slides.slice(start, start + CONCURRENT_PAGES);
+    const rendered = await Promise.all(
+      batch.map(async (slide, offset) => {
         const buffer = await exportSlide(slide, aspectRatio);
-        onProgress?.(idx + 1, slides.length);
-        return { name: `slide-${idx + 1}.png`, buffer };
+        onProgress?.(++done, slides.length);
+        return { name: `slide-${start + offset + 1}.png`, buffer };
       })
     );
-    results.push(...batchResults);
+    files.push(...rendered);
   }
 
-  return results;
+  return files;
 }

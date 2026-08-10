@@ -1,7 +1,6 @@
 import { readDataSafe, writeData } from "./data";
 import { now } from "./utils";
-import type { BrandConfig } from "@/types/brand";
-import { DEFAULT_BRAND } from "@/types/brand";
+import { DEFAULT_BRAND, type BrandConfig } from "@/types/brand";
 
 const FILE = "brand.json";
 
@@ -9,22 +8,28 @@ export async function getBrand(): Promise<BrandConfig> {
   return readDataSafe<BrandConfig>(FILE, DEFAULT_BRAND);
 }
 
+/**
+ * Patch the brand. Colours and fonts merge field by field, so sending only
+ * `{ colors: { accent } }` doesn't wipe the other four — the panel saves one
+ * control at a time and would otherwise erase the rest on every keystroke.
+ */
 export async function updateBrand(
-  updates: Partial<Omit<BrandConfig, "createdAt" | "updatedAt">>
+  patch: Partial<Omit<BrandConfig, "createdAt" | "updatedAt">>
 ): Promise<BrandConfig> {
   const current = await getBrand();
-  const updated: BrandConfig = {
+  const stamp = now();
+
+  const next: BrandConfig = {
     ...current,
-    ...updates,
-    colors: { ...current.colors, ...updates.colors },
-    fonts: { ...current.fonts, ...updates.fonts },
-    updatedAt: now(),
-    createdAt: current.createdAt || now(),
+    ...patch,
+    colors: { ...current.colors, ...patch.colors },
+    fonts: { ...current.fonts, ...patch.fonts },
+    createdAt: current.createdAt || stamp,
+    updatedAt: stamp,
   };
-  await writeData(FILE, updated);
-  return updated;
+
+  await writeData(FILE, next);
+  return next;
 }
 
-export function isBrandConfigured(brand: BrandConfig): boolean {
-  return brand.name.trim().length > 0;
-}
+export { isBrandConfigured } from "@/types/brand";

@@ -1,35 +1,23 @@
-import { NextResponse } from "next/server";
-import { listCarousels, createCarousel } from "@/lib/carousels";
-import type { AspectRatio } from "@/types/carousel";
+import { createCarousel, listCarousels } from "@/lib/carousels";
+import { badRequest, created, guard, ok, readJson, text } from "@/lib/http";
+import { isAspectRatio, type AspectRatio } from "@/types/carousel";
+
+const DEFAULT_RATIO: AspectRatio = "4:5";
 
 export async function GET() {
-  const carousels = await listCarousels();
-  return NextResponse.json({ carousels });
+  return ok({ carousels: await listCarousels() });
 }
 
 export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { name, aspectRatio } = body as {
-      name?: string;
-      aspectRatio?: AspectRatio;
-    };
+  return guard(async () => {
+    const body = await readJson<{ name?: string; aspectRatio?: string }>(request);
+    const name = text(body?.name);
+    if (!name) return badRequest("A name is required");
 
-    if (!name || typeof name !== "string" || !name.trim()) {
-      return NextResponse.json(
-        { error: "Name is required" },
-        { status: 400 }
-      );
-    }
+    // An unknown ratio falls back rather than failing: the value comes from a
+    // picker with three options, and the portrait one is what people want.
+    const ratio = isAspectRatio(body?.aspectRatio) ? body.aspectRatio : DEFAULT_RATIO;
 
-    const validRatios: AspectRatio[] = ["1:1", "4:5", "9:16"];
-    const ratio = validRatios.includes(aspectRatio as AspectRatio)
-      ? (aspectRatio as AspectRatio)
-      : "4:5";
-
-    const carousel = await createCarousel(name.trim(), ratio);
-    return NextResponse.json(carousel, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+    return created(await createCarousel(name, ratio));
+  });
 }

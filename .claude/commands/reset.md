@@ -1,14 +1,25 @@
 ---
-description: Wipe local carousels & uploads, then re-seed defaults (asks first).
-allowed-tools: Bash(rm *), Bash(npm run setup), Bash(ls *), AskUserQuestion
+description: Erase every local carousel, image and export, then start clean (asks first).
+allowed-tools: Bash(rm *), Bash(ls *), Bash(node *), AskUserQuestion
 ---
 
-Confirm with the user via AskUserQuestion:
+This is destructive and nothing here is recoverable — `data/` and
+`public/uploads/` are the only copy.
 
-> "This will delete every locally saved carousel, template, brand config, uploaded image, and export from `data/` and `public/uploads/`. Continue?"
+First, show what is about to be lost. Count the carousels in
+`data/carousels.json`, the templates in `data/templates.json`, and the files in
+`public/uploads/`.
 
-Options: **Yes, wipe everything** / **Cancel**.
+Then ask with AskUserQuestion, naming those numbers:
 
-On **Yes**: run `rm -rf data/*.json public/uploads/* data/exports/*` then `npm run setup` to re-seed default empty data files. Report what was reset (e.g., "Wiped 3 carousels, 12 uploads, 1 export. Defaults restored.").
+> "Delete N carousels, M templates and K uploaded images? Your brand settings
+> stay. This cannot be undone."
 
-On **Cancel**: do nothing; reply "No changes made."
+Options: **Delete everything** / **Keep my work**.
+
+On **Delete everything**: remove `data/carousels.json`, `data/templates.json`,
+`data/history-*.json`, `data/exports/*` and `public/uploads/*`. Leave
+`data/brand.json` and `data/settings.json` alone — losing a configured brand is
+rarely what someone means by "reset". Report exactly what was removed.
+
+On **Keep my work**: change nothing and say so.

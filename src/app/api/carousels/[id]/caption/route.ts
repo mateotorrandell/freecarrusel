@@ -1,5 +1,11 @@
-import { NextResponse } from "next/server";
 import { getCarousel, updateCarousel } from "@/lib/carousels";
+import { guard, notFound, ok, readJson } from "@/lib/http";
+import type { Carousel } from "@/types/carousel";
+
+const asPayload = (c: Carousel) => ({
+  caption: c.caption ?? "",
+  hashtags: c.hashtags ?? [],
+});
 
 export async function GET(
   _request: Request,
@@ -7,13 +13,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const carousel = await getCarousel(id);
-  if (!carousel) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  return NextResponse.json({
-    caption: carousel.caption || "",
-    hashtags: carousel.hashtags || [],
-  });
+  return carousel ? ok(asPayload(carousel)) : notFound("Carousel not found");
 }
 
 export async function PUT(
@@ -21,23 +21,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  try {
-    const body = await request.json();
-    const { caption, hashtags } = body as {
-      caption?: string;
-      hashtags?: string[];
-    };
+  return guard(async () => {
+    const body = await readJson<{ caption?: string; hashtags?: string[] }>(request);
 
-    const updated = await updateCarousel(id, { caption, hashtags });
-    if (!updated) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({
-      caption: updated.caption || "",
-      hashtags: updated.hashtags || [],
+    const updated = await updateCarousel(id, {
+      caption: body?.caption,
+      // Normalise: the assistant sends them with and without the hash.
+      hashtags: body?.hashtags?.map((tag) =>
+        tag.startsWith("#") ? tag : `#${tag}`
+      ),
     });
-  } catch {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  }
+
+    return updated ? ok(asPayload(updated)) : notFound("Carousel not found");
+  });
 }
